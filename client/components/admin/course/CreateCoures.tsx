@@ -1,0 +1,217 @@
+"use client";
+
+import React, { useState } from "react";
+import CourseOptions from "./CourseOptions";
+import CourseInformation from "./courseInformation/CourseInformation";
+import CouresData from "./courseData/CouresData";
+import useScrollToTop from "@/customHooks/useScrollToTop";
+import CourseContent from "./courseContent/CourseContent";
+import CoursePreview from "./coursePreview/CoursePreview";
+import { CourseData, CourseInfo } from "@/types/course.type";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { createCourse } from "@/lib/api/createCourse";
+import ConfirmCourseModal from "@/components/modal/ConfirmCourseModal";
+import { getAllCategories } from "@/lib/api/getAllCategories";
+import { Organization } from "@/types/organization.type";
+import { useAppSelector } from "@/redux/hooks";
+
+export default function CreateCourse() {
+  const { user } = useAppSelector((state) => state.auth);
+
+  const router = useRouter();
+  const [isOpen, setIsOpen] = useState(false);
+  const [active, setActive] = useState(2);
+
+  const [courseInfo, setCourseInfo] = useState<CourseInfo>({
+    name: "",
+    description:"",    price: "",
+    estimatePrice: "",
+    tags:"" , 
+    level:"",
+    status:"published",
+    demoUrl: "",
+    thumbnail: "",
+  });
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedOrganization, setSelectedOrganization] =
+    useState<Organization | null>(null);
+  const [benefits, setBenefits] = useState([{ title: "" }]);
+
+  const [prerequisites, setPrerequisites] = useState([{ title: "" }]);
+
+  const [courseContentData, setCourseContentData] = useState([
+    {
+      videoUrl: "",
+      title: "",
+      description : "",
+      videoSection: "",
+      videoLength: "",
+      links: [
+        {
+          title: "",
+          url: "",
+        },
+      ],
+      suggestion: "",
+      isFree: false,
+    },
+  ]);
+
+  const [courseData, setCourseData] = useState<CourseData | null>(null);
+
+  const handleSubmitCourse = () => {
+    const formattedBenefits = benefits.map((item) => ({
+      title: item.title,
+    }));
+
+    const formattedPrerequisites = prerequisites.map((item) => ({
+      title: item.title,
+    }));
+
+    const formattedCourseContent = courseContentData.map((courseContent) => ({
+      title: courseContent.title,
+      description: courseContent.description,
+      videoUrl: courseContent.videoUrl,
+      videoLength: courseContent.videoLength,
+      videoSection: courseContent.videoSection,
+      links: courseContent.links.map((link) => ({
+        title: link.title,
+        url: link.url,
+      })),
+
+      suggestion: courseContent.suggestion,
+      isFree: courseContent.isFree,
+    }));
+
+    // Create complete course object
+    if (!selectedCategory) {
+      toast.error("Please select a category");
+      return;
+    }
+
+    if (user?.role === "admin") {
+      if (!selectedOrganization) {
+        toast.error("Please select an organization");
+        return;
+      }
+    }
+    const data = {
+      name: courseInfo.name,
+      description: courseInfo.description,
+      category: selectedCategory,
+      price: Number(courseInfo.price),
+      estimatePrice: Number(courseInfo.estimatePrice),
+
+      organizationId: selectedOrganization?._id,
+      instructorId: selectedOrganization?.instructor._id,
+
+      tags: courseInfo.tags,
+      level: courseInfo.level,
+      status: courseInfo.status,
+      demoUrl: courseInfo.demoUrl,
+      thumbnail: courseInfo.thumbnail,
+      totalVideos: courseContentData.length,
+      benefits: formattedBenefits,
+      prerequisites: formattedPrerequisites,
+      courseData: formattedCourseContent,
+    };
+
+    // Save all course data in state
+    setCourseData(data);
+    console.log("Course Data:", data);
+  };
+
+  const createCourseMutation = useMutation({
+    mutationFn: createCourse,
+    onSuccess: (data) => {
+      setIsOpen(false);
+      toast.success("Course Created Successfully");
+      router.push("/admin/courses");
+      console.log(data);
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed Create Course");
+    },
+  });
+  const handleCourseCreate = () => {
+    if (!courseData) return;
+    console.log(courseData);
+    createCourseMutation.mutate(courseData);
+  };
+  useScrollToTop(active);
+  const { data } = useQuery({
+    queryKey: ["categories"],
+    queryFn: () => getAllCategories(),
+    staleTime: 1000 * 60 * 60,
+  });
+  return (
+    <div className="relative min-h-screen">
+      <div className="mb-6 rounded-xl border border-border bg-card p-4 lg:hidden">
+        <CourseOptions active={active} setActive={setActive} />
+      </div>
+
+      <main className="w-full lg:pr-72">
+        {active === 0 && (
+          <CourseInformation
+            courseInfo={courseInfo}
+            setCourseInfo={setCourseInfo}
+            active={active}
+            setActive={setActive}
+            categoriesOptions={data?.categories || []}
+            selectedCategory={selectedCategory}
+            setSelectedCategory={setSelectedCategory}
+            selectedOrganization={selectedOrganization}
+            setSelectedOrganization={setSelectedOrganization} 
+            role={user?.role}
+          />
+        )}
+
+        {active === 1 && (
+          <CouresData
+            active={active}
+            setActive={setActive}
+            benefits={benefits}
+            setBenefits={setBenefits}
+            prerequisites={prerequisites}
+            setPrerequisites={setPrerequisites}
+          />
+        )}
+
+        {active === 2 && (
+          <CourseContent
+            active={active}
+            setActive={setActive}
+            courseContentData={courseContentData}
+            setCourseContentData={setCourseContentData}
+            handleSubmitCourse={handleSubmitCourse}
+          />
+        )}
+
+        {active === 3 && (
+          <CoursePreview
+            active={active}
+            setActive={setActive}
+            courseData={courseData}
+            onOpen={() => setIsOpen(true)}
+            isEdit={false}
+          />
+        )}
+      </main>
+
+      <aside className="fixed right-0 top-24 z-50 hidden w-64 lg:block">
+        <CourseOptions active={active} setActive={setActive} />
+      </aside>
+
+      <ConfirmCourseModal
+        open={isOpen}
+        onClose={() => setIsOpen(false)}
+        courseData={courseData}
+        isCreating={createCourseMutation.isPending}
+        onConfirm={handleCourseCreate}
+        isEdit={false}
+      />
+    </div>
+  );
+}

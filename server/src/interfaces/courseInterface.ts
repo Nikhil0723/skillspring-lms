@@ -1,0 +1,114 @@
+import { Document, Types } from "mongoose";
+import { IUser } from "./userInterface";
+
+export const COURSE_STATUSES = ["draft", "published", "archived"] as const;
+
+export type CourseStatus = (typeof COURSE_STATUSES)[number];
+
+export interface IComment extends Document {
+  user: IUser;
+  question: string;
+  questionReplies?: IComment[];
+}
+
+export interface IReplyReview extends Document {
+  user: IUser;
+  comment: string;
+}
+
+export interface IReview extends Document {
+  user: IUser;
+  rating: number;
+  comment: string;
+  commentReplies?: IReplyReview[];
+}
+
+export interface ILink extends Document {
+  title: string;
+  url: string;
+}
+
+interface IThumbnail extends Document {
+  public_Id: string;
+  url: string;
+}
+
+export interface ICourseData extends Document {
+  title: string;
+  description: string;
+  videoUrl: string;
+  videoThumbnail: object;
+  videoSection: string;
+  videoLength: number;
+  isFree: boolean;
+  videoPlayer: string;
+  links: ILink[];
+  suggestion: string;
+  questions: IComment[];
+}
+
+export interface ICourse extends Document {
+  name: string;
+  description: string;
+  category: Types.ObjectId;
+  price: number;
+  estimatePrice: number;
+  thumbnail: IThumbnail;
+  organization: Types.ObjectId;
+  instructor: Types.ObjectId;
+  createdBy: Types.ObjectId;
+  tags: string;
+  level: string;
+  demoUrl: string;
+  status: CourseStatus;
+  benefits: { title: string }[];
+  prerequisites: { title: string }[];
+  reviews: IReview[];
+  courseData: ICourseData[];
+  ratings?: number;
+  purchased?: number;
+  reviewsCount?: number;
+  totalLectures?: number;
+  totalHours?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+
+export interface IAddQuestionData {
+  question: string;
+  courseId: string;
+  contentId: string;
+}
+
+export interface IAnswerData {
+  answer: string;
+  questionId: string;
+  contentId: string;
+  courseId: string;
+}
+
+export interface IAddReviewData {
+  rating: number;
+  review: string;
+}
+
+export interface IAddReplyReviewData {
+  comment: string;
+  reviewId: string;
+  courseId: string;
+}
+
+export type IPublicCourseData = {
+  title: string;
+  description: string;
+  videoThumbnail: object;
+  videoSection: string;
+  videoLength: number;
+  isFree: boolean;
+  videoPlayer: string;
+  suggestion?: string;
+  questions?: IComment[];
+  videoUrl?: string;
+  links?: ILink[];
+};

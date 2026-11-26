@@ -1,0 +1,143 @@
+"use client";
+
+import { getCourseDetails } from "@/lib/api/getCourseDetails";
+import { getPublicCoursesUser } from "@/lib/api/getPublicCoursesUser";
+import { useAppSelector } from "@/redux/hooks";
+import { useQuery } from "@tanstack/react-query";
+
+import CourseContent from "./CourseContent";
+import CourseHero from "./CourseHero";
+import CoursePurchase from "./CoursePurchased";
+import { useEffect, useRef, useState } from "react";
+import { captureEvent } from "@/lib/analytics";
+import CheckoutSidebar from "../modal/CheckoutSidebar";
+import CourseDetailSkeleton from "../skeleton/CourseDetailsSkeleton";
+import ErrorStateCourseDetails from "./ErrorStateCourseDetails";
+
+type Props = {
+  id: string;
+};
+
+export default function CourseDetailS({ id }: Props) {
+  const { user } = useAppSelector((state) => state.auth);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const trackedCourseId = useRef<string | null>(null);
+
+  const {
+    data,
+    isLoading,
+    isRefetching,
+    isError = true,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ["course-details", id],
+    queryFn: async () => {
+      const details = await getCourseDetails(id);
+
+      // the details payload may omit badge flags on older backend
+      // deployments; the catalog list already carries them, so reuse it.
+      const course = details.course;
+      const missingBadges =
+        course &&
+        course.isBestseller === undefined &&
+        course.isHighestRated === undefined &&
+        course.isNew === undefined;
+
+      if (missingBadges) {
+        const findMatch = async (query: string) => {
+          try {
+            const list = await getPublicCoursesUser(query);
+            return list.courses?.find((item) => item._id === course._id);
+          } catch {
+            return undefined;
+          }
+        };
+
+        const match =
+          (await findMatch(
+            `search=${encodeURIComponent(course.name)}&limit=20`,
+          )) ?? (await findMatch("limit=100"));
+
+        if (match) {
+          return {
+            ...details,
+            course: {
+              ...course,
+              isBestseller: match.isBestseller,
+              isHighestRated: match.isHighestRated,
+              isNew: match.isNew,
+            },
+          };
+        }
+      }
+
+      return details;
+    },
+    staleTime: 60 * 60 * 1000,
+  });
+
+  useEffect(() => {
+    const viewedCourse = data?.course;
+    if (!viewedCourse) return;
+    const courseId = String(viewedCourse._id);
+    if (trackedCourseId.current === courseId) return;
+    trackedCourseId.current = courseId;
+    captureEvent("course viewed", {
+      course_id: courseId,
+      course_name: viewedCourse.name,
+      price: Number(viewedCourse.price),
+      level: viewedCourse.level,
+    });
+  }, [data?.course]);
+
+  if (isLoading || isRefetching) {
+    return <CourseDetailSkeleton />;
+  }
+
+  if (isError || !data?.course) {
+    return <ErrorStateCourseDetails refetch={refetch} error={error?.message} />;
+  }
+
+  const course = data.course;
+
+  const isPurchased = user?.courses?.some((item) => item === id);
+
+  const discountPercentage =
+    course.estimatePrice > course.price
+      ? Math.round(
+          ((course.estimatePrice - course.price) / course.estimatePrice) * 100,
+        )
+      : 0;
+  
+  return (
+    <main className={`min-h-screen bg-background text-foreground ${user?.role === "instructor" ? "-mt-6":""}`}>
+      <CourseHero
+        isPurchased={isPurchased}
+        discountPercentage={discountPercentage}
+        course={course}
+        onBuyNow={() => {
+          captureEvent("checkout modal opened", { course_id: String(course._id), source: "course_hero" });
+          setCheckoutOpen(true);
+        }}
+      />
+
+      <CoursePurchase
+        course={course}
+        isPurchased={isPurchased}
+        discountPercentage={discountPercentage}
+        onBuyNow={() => {
+          captureEvent("checkout modal opened", { course_id: String(course._id), source: "purchase_card" });
+          setCheckoutOpen(true);
+        }}
+      />
+
+      <CourseContent course={course} isPurchased={isPurchased} />
+      <CheckoutSidebar
+        open={checkoutOpen}
+        onOpenChange={setCheckoutOpen}
+        courseId={course?._id}
+      />
+    </main>
+  );
+}

@@ -1,0 +1,212 @@
+"use client";
+import { getContentCourse } from "@/lib/api/getContentCourse";
+import { ApiError } from "@/lib/ApiError";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { redirect, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import ContentCourseMedia from "./ContentCourseMedia";
+import EnrolledContentCourseSkeleton from "../skeleton/EnrolledContentCourseSkeleton";
+import { updateCurrentLecture } from "@/lib/api/updateCurrentLecture";
+import CourseCompletionCelebration from "./CourseCompletionCelebration";
+import { generateCertificate } from "@/lib/api/generateCertificate";
+import GenerateCertificateModal from "../GenerateCertificateModal";
+import { toast } from "sonner";
+import CourseContentList from "@/components/courseDetails/CourseContentList";
+
+type Props = {
+  id: string;
+};
+export default function EnrolledContentCourse({ id }: Props) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [showCertificateModal, setShowCertificateModal] = useState(false);
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["access-content-course", id],
+    queryFn: () => getContentCourse(id),
+    staleTime: 60 * 1000,
+  });
+  const activeVideoParam = searchParams.get("activeVideo");
+  const [activeVideo, setActiveVideo] = useState(
+    activeVideoParam ? Number(activeVideoParam) : 0,
+  );
+  const [isInitialLectureResolved, setIsInitialLectureResolved] =
+    useState(false);
+  const courseData = useMemo(() => data?.course?.courseData ?? [], [data?.course?.courseData]);
+  const progress = data?.progress;
+
+ 
+  // which lecture should be active when the course opens
+  useEffect(() => {
+    if (!data || courseData.length === 0) {
+      return;
+    }
+
+    if (activeVideoParam !== null) {
+      const urlIndexLecture = Number(activeVideoParam);
+
+      if (
+        Number.isInteger(urlIndexLecture) &&
+        urlIndexLecture >= 0 &&
+        urlIndexLecture < courseData.length
+      ) {
+        setActiveVideo(urlIndexLecture);
+        setIsInitialLectureResolved(true);
+        return;
+      }
+    }
+
+    if (progress?.currentLecture) {
+      const currentLectureIndex = courseData.findIndex(
+        (lecture) =>
+          lecture?._id?.toString() === progress.currentLecture?.toString(),
+      );
+
+      if (currentLectureIndex !== -1) {
+        setActiveVideo(currentLectureIndex);
+        setIsInitialLectureResolved(true);
+        return;
+      }
+    }
+
+    setActiveVideo(0);
+    setIsInitialLectureResolved(true);
+  }, [data, courseData, activeVideoParam, progress?.currentLecture]);
+
+  const { mutate: saveCurrentLecture } = useMutation({
+    mutationFn: (lectureId: string) => updateCurrentLecture(id, lectureId),
+    onSuccess: (_data, lectureId) => {
+      queryClient.setQueryData(["access-content-course", id], (oldData: any) => {
+        if (!oldData?.progress) return oldData;
+
+        return {
+          ...oldData,
+          progress: {
+            ...oldData.progress,
+            currentLecture: lectureId,
+          },
+        };
+      });
+    },
+  });
+
+  useEffect(() => {
+    if (!isInitialLectureResolved) {
+      return;
+    }
+
+    if (courseData.length === 0) {
+      return;
+    }
+    const currentLecture = courseData[activeVideo];
+    if (!currentLecture?._id) {
+      return;
+    }
+    const currentLectureId = currentLecture._id.toString();
+    const savedLectureId = progress?.currentLecture?.toString();
+
+    // No need to send another request
+    if (currentLectureId === savedLectureId) {
+      return;
+    }
+    saveCurrentLecture(currentLectureId);
+  }, [
+    activeVideo,
+    courseData,
+    progress?.currentLecture,
+    isInitialLectureResolved,
+    saveCurrentLecture,
+  ]);
+
+  const handleVideoChange = (index: number) => {
+    const lecture = courseData[index];
+
+    if (!lecture?._id) {
+      return;
+    }
+
+    setActiveVideo(index);
+
+    const params = new URLSearchParams(searchParams.toString());
+
+    params.set("activeVideo", index.toString());
+
+    router.replace(`?${params.toString()}`, {
+      scroll: false,
+    });
+
+  };
+
+  const isCourseCompleted = progress?.progressPercentage === 100;
+
+  const generateCertificateMutation = useMutation({
+    mutationFn: () => generateCertificate(id),
+    onSuccess: (data) => {
+      router.push(
+        `/user/certificate/${data.certificate.course}/${data.certificate.certificateId}`,
+      );
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
+  if (isLoading) {
+    return <EnrolledContentCourseSkeleton />;
+  }
+
+  if (isError) {
+    if (error instanceof ApiError && error.status === 403) {
+      redirect("/");
+    }
+
+    return (
+      <div className="flex min-h-[400px] items-center justify-center">
+        <p className="text-sm text-muted-foreground">{error.message}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full px-2">
+      {showCelebration && <CourseCompletionCelebration />}
+
+      <div className="flex w-full flex-col gap-2 md:flex-row">
+        <div className="md:w-[65%]">
+          <ContentCourseMedia
+            data={courseData}
+            reviews={data?.course.reviews}
+            courseId={id}
+            activeVideo={activeVideo}
+            handleVideoChange={handleVideoChange}
+            refetchContent={refetch}
+            progress={data?.progress}
+            setShowCelebration={setShowCelebration}
+            isCourseCompleted={isCourseCompleted}
+            onGetCertificate={() => setShowCertificateModal(true)}
+          />
+        </div>
+
+        <div className="md:w-[35%]">
+          <CourseContentList
+            isPurchased={true}
+            data={courseData}
+            handleVideoChange={handleVideoChange}
+            activeVideo={activeVideo}
+            isContentCourse={true}
+            completedLectures={progress?.completedLectures ?? []}
+          />
+        </div>
+      </div>
+
+      <GenerateCertificateModal
+        open={showCertificateModal}
+        onOpenChange={setShowCertificateModal}
+        courseTitle={data?.course?.name ?? ""}
+        isPending={generateCertificateMutation.isPending}
+        onGenerate={() => generateCertificateMutation.mutate()}
+      />
+    </div>
+  );
+}

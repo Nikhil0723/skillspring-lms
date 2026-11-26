@@ -1,0 +1,281 @@
+import { Types } from "mongoose";
+import {
+  completeLecture,
+  createCourseProgress,
+  getCourseProgress,
+  getUserCoursesProgress,
+  updateCurrentLecture,
+} from "../repositories/courseProgress.respository";
+import AppError from "../utils/AppError";
+import {
+  getContentCourse,
+  getCoursesByIds,
+} from "../repositories/course.repository";
+import CourseProgressModel from "../models/courseProgress.model";
+import UserModel from "../models/user.model";
+
+const assertEnrollment = async (userId: string, courseId: string) => {
+  const enrolled = await UserModel.exists({ _id: userId, courses: courseId });
+  if (!enrolled) throw new AppError("You are not enrolled in this course", 403);
+};
+
+export const initializeCourseProgress = async (
+  userId: string,
+  courseId: string,
+  totalLectures: number,
+  organizationId: string,
+) => {
+  return createCourseProgress(userId, courseId, totalLectures, organizationId);
+};
+
+export const getCourseProgressService = async (
+  userId: string,
+  courseId: string,
+) => {
+  if (!userId || !courseId) {
+    throw new AppError("CourseId and UserId are required", 400);
+  }
+
+  if (!Types.ObjectId.isValid(courseId)) {
+    throw new AppError("Invalid course ID", 400);
+  }
+
+  const course = await getContentCourse(courseId);
+
+  if (!course) {
+    throw new AppError("Course not found", 404);
+  }
+  await assertEnrollment(userId, courseId);
+
+  let progress = await getCourseProgress(userId, courseId);
+
+  const totalLectures = course.courseData?.length ?? 0;
+
+  if (!progress) {
+    progress = await createCourseProgress(
+      userId,
+      courseId,
+      totalLectures,
+      String(course.organization ?? ""),
+    );
+  } else if (progress.totalLectures !== totalLectures) {
+    // keep the stored snapshot in sync with the current course content
+    await CourseProgressModel.updateOne(
+      { _id: progress._id },
+      { $set: { totalLectures } },
+    );
+
+    progress.totalLectures = totalLectures;
+  }
+
+  const lectureIds = new Set((course.courseData ?? []).map((lecture) => String(lecture._id)));
+  const completedLectures = progress.completedLectures.filter((id) => lectureIds.has(String(id)));
+  if (completedLectures.length !== progress.completedLectures.length) {
+    await CourseProgressModel.updateOne(
+      { _id: progress._id },
+      { $set: { completedLectures } },
+    );
+    progress.completedLectures = completedLectures;
+  }
+  const completedCount = completedLectures.length;
+
+  const progressPercentage =
+    totalLectures === 0
+      ? 0
+      : Math.min(
+          100,
+          Math.round((completedCount / totalLectures) * 100),
+        );
+
+  return {
+    ...progress.toObject(),
+    completedCount,
+    totalLectures,
+    progressPercentage,
+  };
+};
+
+export const updateCurrentLectureService = async (
+  userId: string,
+  courseId: string,
+  lectureId: string,
+) => {
+  if (!userId) {
+    throw new AppError("userId is required", 400);
+  }
+
+  if (!courseId) {
+    throw new AppError("Course ID is required", 400);
+  }
+
+  if (!lectureId) {
+    throw new AppError("Lecture ID is required", 400);
+  }
+
+  if (!Types.ObjectId.isValid(courseId)) {
+    throw new AppError("Invalid course ID", 400);
+  }
+
+  if (!Types.ObjectId.isValid(lectureId)) {
+    throw new AppError("Invalid lecture ID", 400);
+  }
+
+  const course = await getContentCourse(courseId);
+
+  if (!course) {
+    throw new AppError("Course not found", 404);
+  }
+  await assertEnrollment(userId, courseId);
+
+  const lectureExists = course.courseData.some(
+    (lecture) => lecture._id.toString() === lectureId,
+  );
+
+  if (!lectureExists) {
+    throw new AppError("Lecture not found in this course", 404);
+  }
+
+  const progress = await updateCurrentLecture(userId, courseId, lectureId);
+
+  if (!progress) {
+    throw new AppError("Course progress not found", 404);
+  }
+
+  return progress;
+};
+
+export const completeLectureService = async (
+  userId: string,
+  courseId: string,
+  lectureId: string,
+) => {
+  if (!userId) {
+    throw new AppError("User ID is required", 400);
+  }
+
+  if (!courseId) {
+    throw new AppError("Course ID is required", 400);
+  }
+
+  if (!Types.ObjectId.isValid(courseId)) {
+    throw new AppError("Invalid course ID", 400);
+  }
+
+  if (!lectureId) {
+    throw new AppError("Lecture ID is required", 400);
+  }
+
+  if (!Types.ObjectId.isValid(lectureId)) {
+    throw new AppError("Invalid lecture ID", 400);
+  }
+
+  // 4 Check course exists
+  const course = await getContentCourse(courseId);
+
+  if (!course) {
+    throw new AppError("Course not found", 404);
+  }
+  await assertEnrollment(userId, courseId);
+
+  // 5 Check lecture exists inside this course
+  const lectureExists = course.courseData.some(
+    (lecture) => lecture._id.toString() === lectureId,
+  );
+
+  if (!lectureExists) {
+    throw new AppError("Lecture not found in this course", 404);
+  }
+
+  const progress = await CourseProgressModel.findOne({
+    user: userId,
+    course: courseId,
+  });
+
+  if (!progress) {
+    throw new AppError("Course progress not found", 404);
+  }
+
+  const alreadyCompleted = progress.completedLectures.some(
+    (completedId) => String(completedId) === lectureId,
+  );
+  if (alreadyCompleted) return { progress, wasNew: false };
+
+  // Add lecture to completedLectures
+  const updatedProgress = await completeLecture(userId, courseId, lectureId);
+
+  if (!updatedProgress) {
+    throw new AppError("Failed to update course progress", 500);
+  }
+
+  return { progress: updatedProgress, wasNew: true };
+};
+
+export const getUserCoursesProgressService = async (userId: string) => {
+  if (!userId) {
+    throw new AppError("User ID is required", 400);
+  }
+  if (!Types.ObjectId.isValid(userId)) {
+    throw new AppError("Invalid user ID", 400);
+  }
+  const progress = await getUserCoursesProgress(userId);
+
+  if (!progress.length) {
+    return [];
+  }
+  const user = await UserModel.findById(userId).select("courses").lean();
+  const enrolledIds = new Set((user?.courses ?? []).map((id) => String(id)));
+  const enrolledProgress = progress.filter((item) => enrolledIds.has(String(item.course)));
+  const courseIds = enrolledProgress.map((item) => item.course.toString());
+  const courses = await getCoursesByIds(courseIds);
+  const data = enrolledProgress
+    .map((item) => {
+      const course = courses.find(
+        (course) => course._id.toString() === item.course.toString(),
+      );
+      if (!course) {
+        return null;
+      }
+      const totalLectures = course.courseData.length;
+      const lectureIds = new Set(course.courseData.map((lecture) => String(lecture._id)));
+      const completedLectures = item.completedLectures.filter((id) => lectureIds.has(String(id)));
+      const completedCount = completedLectures.length;
+      const progressPercentage =
+        totalLectures === 0
+          ? 0
+          : Math.min(100, Math.round((completedCount / totalLectures) * 100));
+      const currentLecture =
+        course.courseData.find(
+          (lecture) =>
+            lecture._id.toString() === item.currentLecture?.toString(),
+        ) ?? null;
+
+      return {
+        _id: item._id,
+        user: item.user,
+        course: {
+          _id: course._id,
+          name: course.name,
+          thumbnail: course.thumbnail,
+          level: course.level,
+          ratings: course.ratings,
+        },
+        currentLecture: currentLecture
+          ? {
+              _id: currentLecture._id,
+              title: currentLecture.title,
+              videoUrl:currentLecture.videoUrl
+            }
+          : null,
+        completedLectures,
+        completedCount,
+        totalLectures,
+        progressPercentage,
+        lastAccessedAt: item.lastAccessedAt,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+      };
+    })
+    .filter(Boolean);
+
+  return data;
+};

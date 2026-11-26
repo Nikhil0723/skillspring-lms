@@ -1,0 +1,99 @@
+"use client";
+
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+import { usePathname } from "next/navigation";
+
+interface UserSelectFiltersProps {
+  searchParams: URLSearchParams;
+  updateQuery: (key: string, value: string) => void;
+}
+
+export default function UserSelectFilters({
+  searchParams,
+  updateQuery,
+}: UserSelectFiltersProps) {
+  const pathName = usePathname();
+
+  const isTeam = pathName.includes("/team");
+
+  return (
+    <div className="flex w-full flex-col gap-4">
+      {!isTeam && (
+        <div className="flex w-full flex-col gap-1.5">
+          <label className="text-sm font-medium text-foreground">Role</label>
+
+          <Select
+            value={searchParams.get("role") || "all"}
+            onValueChange={(value) => updateQuery("role", value)}>
+            <SelectTrigger className="h-10 w-full">
+              <SelectValue placeholder="Select role" />
+            </SelectTrigger>
+
+            <SelectContent className="w-full">
+              <SelectItem value="all">All Roles</SelectItem>
+
+              <SelectItem value="user">User</SelectItem>
+
+              <SelectItem value="instructor">Instructor</SelectItem>
+
+              <SelectItem value="admin">Admin</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      <div className="flex w-full flex-col gap-1.5">
+        <label className="text-sm font-medium text-foreground">
+          Verification
+        </label>
+
+        <Select
+          value={searchParams.get("isVerified") || "all"}
+          onValueChange={(value) => updateQuery("isVerified", value)}>
+          <SelectTrigger className="h-10 w-full">
+            <SelectValue placeholder="Select verification" />
+          </SelectTrigger>
+
+          <SelectContent className="w-full">
+            <SelectItem value="all">All</SelectItem>
+
+            <SelectItem value="true">Verified</SelectItem>
+
+            <SelectItem value="false">Not Verified</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex w-full flex-col gap-1.5">
+        <label className="text-sm font-medium text-foreground">Sort by</label>
+
+        <Select
+          value={searchParams.get("sort") || "all"}
+          onValueChange={(value) => updateQuery("sort", value)}>
+          <SelectTrigger className="h-10 w-full">
+            <SelectValue placeholder="Select sorting" />
+          </SelectTrigger>
+
+          <SelectContent className="w-full">
+            <SelectItem value="all">Default</SelectItem>
+
+            <SelectItem value="-createdAt">Newest</SelectItem>
+
+            <SelectItem value="createdAt">Oldest</SelectItem>
+
+            <SelectItem value="name">Name: A-Z</SelectItem>
+
+            <SelectItem value="-name">Name: Z-A</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
